@@ -304,9 +304,13 @@ static bool disassembly_ins_is_bl_blx(uint32_t addr) {
 
     if ((ins2 & BL_INS_MASK) == BL_INS_HIGH && (ins1 & BL_INS_MASK) == BL_INS_LOW) {
         return true;
-    } else if ((ins2 & BLX_INX_MASK) == BLX_INX) {
+    }
+    #if 0 // STM32405 only thumb-2 instruction BL
+    else if ((ins2 & BLX_INX_MASK) == BLX_INX) {
         return true;
-    } else {
+    }
+    #endif
+    else {
         return false;
     }
 }
@@ -742,6 +746,62 @@ static inline int is_valid_code_addr(uint32_t addr) {
 }
 
 /**
+ * 解码 BL 指令，返回跳转偏移量（字节为单位）
+ * @param inst_high  第一半字（高位半字）
+ * @param inst_low   第二半字（低位半字）
+ * @param out_offset 输出偏移量（字节），可为 NULL
+ * @return 成功返回 0，失败返回 -1
+ */
+int decode_bl(uint32_t addr, int32_t *out_offset) {
+// �� bug 
+    uint16_t ins1 = *((uint16_t *)addr);
+    uint16_t ins2 = *((uint16_t *)(addr + 2));
+
+    // 1. 检查是否是 BL 指令
+    if ((ins1 & 0xF800) != 0xF000) {
+        return -1;
+    }
+    if ((ins2 & 0xF800) != 0xF800) {
+        return -1;
+    }
+
+    // 2. 提取所有字段
+    unsigned int S     = (ins1 >> 10) & 0x1;
+    unsigned int imm10 = ins1 & 0x3FF;
+    
+    unsigned int J2    = (ins2 >> 10) & 0x1;
+    unsigned int J1    = (ins2 >> 9)  & 0x1;
+    unsigned int imm11 = ins2 & 0x7FF;
+    
+    // 3. 反向计算 offset[13] 和 offset[12]
+    unsigned int offset_bit13 = 1 ^ J2 ^ S;
+    unsigned int offset_bit12 = 1 ^ J1 ^ S;
+    
+    // 4. 重建 25 位偏移量 (bit[24:0])
+    uint32_t offset_raw = 0;
+    offset_raw |= (S << 24);           // bit[24]
+    offset_raw |= (imm10 << 14);       // bit[23:14]
+    offset_raw |= (offset_bit13 << 13); // bit[13]
+    offset_raw |= (offset_bit12 << 12); // bit[12]
+    offset_raw |= (imm11 << 1);        // bit[11:1]
+    // bit[0] 已经是 0
+    
+    // 5. 符号扩展 25 位到 32 位
+    int32_t final_offset;
+    if (S) {
+        // S=1 表示负数，将 bit[31:25] 全部设为 1
+        final_offset = offset_raw | 0xFE000000;
+    } else {
+        final_offset = offset_raw;
+    }
+
+    if (out_offset) {
+        *out_offset = final_offset;
+    }
+    return 0;
+}
+
+/**
  * @brief backtrace callback function from stack
  * @param name Task name
  * @param stack_addr_start start addrress
@@ -761,8 +821,8 @@ void cm_backtrace_violence_base(const char *name, uint32_t *stack_addr_start, ui
         if (!is_valid_code_addr(value)) {
             continue;
         }
-        #if 0
-        if (!(val & 0x1)) {
+        #if 1
+        if (!(value & 0x1)) {
             continue;
         }
         #endif
