@@ -139,6 +139,8 @@ static bool statck_has_fpu_regs = false;
 
 static bool on_thread_before_fault = false;
 
+static inline int is_valid_code_addr(uint32_t addr);
+
 /**
  * library initialize
  */
@@ -389,25 +391,53 @@ size_t cm_backtrace_call_stack(uint32_t *buffer, size_t size, uint32_t sp) {
         sp = stack_start_addr;
     }
 
+    for (int i = 0; i < size; i++) {
+        buffer[i] = 0;
+    }
     /* copy called function address */
     for (; sp < stack_start_addr + stack_size; sp += sizeof(size_t)) {
-        /* the *sp value may be LR, so need decrease a word to PC */
-        pc = *((uint32_t *) sp) - sizeof(size_t);
-        /* the Cortex-M using thumb instruction, so the pc must be an odd number */
-        if (pc % 2 == 0) {
-            continue;
-        }
-        /* fix the PC address in thumb mode */
-        pc = *((uint32_t *) sp) - 1;
-        if ((pc >= code_start_addr + sizeof(size_t)) && (pc <= code_start_addr + code_size) && (depth < CMB_CALL_STACK_MAX_DEPTH)
-                /* check the the instruction before PC address is 'BL' or 'BLX' */
-                && disassembly_ins_is_bl_blx(pc - sizeof(size_t)) && (depth < size)) {
-            /* the second depth function may be already saved, so need ignore repeat */
-            if ((depth == 2) && regs_saved_lr_is_valid && (pc == buffer[1])) {
+        #if 1
+            (void)(regs_saved_lr_is_valid);
+            // Fixed It by myself
+            uint32_t value = *((uint32_t *)sp);
+            if (!is_valid_code_addr(value)) {
                 continue;
             }
-            buffer[depth++] = pc;
-        }
+            #if 1
+            if (!(value & 0x1)) {
+                continue;
+            }
+            #endif
+            uint32_t pc = value & (~1UL);
+            uint32_t call_site = pc - 4;
+            if (disassembly_ins_is_bl_blx(call_site)) {
+                if (call_site == buffer[depth]) {
+                    continue;
+                }
+                buffer[depth++] = call_site;
+            }
+            if (depth >= size) {
+                break;
+            }
+        #else
+            /* the *sp value may be LR, so need decrease a word to PC */
+            pc = *((uint32_t *) sp) - sizeof(size_t);
+            /* the Cortex-M using thumb instruction, so the pc must be an odd number */
+            if (pc % 2 == 0) {
+                continue;
+            }
+            /* fix the PC address in thumb mode */
+            pc = *((uint32_t *) sp) - 1;
+            if ((pc >= code_start_addr + sizeof(size_t)) && (pc <= code_start_addr + code_size) && (depth < CMB_CALL_STACK_MAX_DEPTH)
+                    /* check the the instruction before PC address is 'BL' or 'BLX' */
+                    && disassembly_ins_is_bl_blx(pc - sizeof(size_t)) && (depth < size)) {
+                /* the second depth function may be already saved, so need ignore repeat */
+                if ((depth == 2) && regs_saved_lr_is_valid && (pc == buffer[1])) {
+                    continue;
+                }
+                buffer[depth++] = pc;
+            }
+        #endif
     }
 
     return depth;

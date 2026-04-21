@@ -78,7 +78,7 @@ void cm_backtrace_current_task_violence(bool is_full);
                                                 __asm volatile ("mov %0, lr" : "=r" (lr));                              \
                                                 __asm volatile ("isb");                                                 \
                                                 cmb_println("backtrace depth=%02d ------->", CMB_CALL_STACK_MAX_DEPTH); \
-                                                cmb_println("sp=0x%08X lr=0x%08X", sp, lr);               \
+                                                cmb_println("sp=0x%08X lr=0x%08X", sp, lr);                             \
                                                 depth = cm_backtrace_call_stack(buffer                                  \
                                                                               , CMB_CALL_STACK_MAX_DEPTH                \
                                                                               , (uint32_t)sp);                          \
