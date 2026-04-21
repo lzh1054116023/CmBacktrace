@@ -170,6 +170,12 @@ void cm_backtrace_init(const char *firmware_name, const char *hardware_ver, cons
         cmb_println(print_info[PRINT_MAIN_STACK_CFG_ERROR]);
         return;
     }
+    cmb_println("main_stack_start_addr = 0x%08X", main_stack_start_addr);
+    cmb_println("main_stack_size       = %d", main_stack_size);
+    cmb_println("code_start_addr       = 0x%08X", code_start_addr);
+    cmb_println("code_size             = %d", code_size);
+    cmb_println("sizeof(StackType_t)   = %d", sizeof(StackType_t));
+    cmb_println("%s", "succesfully");
 
     init_ok = true;
 }
@@ -279,7 +285,7 @@ static void dump_stack(uint32_t stack_start_addr, size_t stack_size, uint32_t *s
     }
     cmb_println(print_info[PRINT_THREAD_STACK_INFO]);
     for (; (uint32_t) stack_pointer < stack_start_addr + stack_size && deep; stack_pointer++, deep--) {
-        cmb_println("  addr: %08x    data: %08x", stack_pointer, *stack_pointer);
+        cmb_println("  addr: %p    data: %08x", stack_pointer, (unsigned int)*stack_pointer);
     }
     cmb_println("====================================");
 }
@@ -440,7 +446,7 @@ void cm_backtrace_assert(uint32_t sp) {
 
     CMB_ASSERT(init_ok);
 
-    cmb_println("");
+    cmb_println(" ");
     cm_backtrace_firmware_info();
 
 #ifdef CMB_USING_OS_PLATFORM
@@ -567,13 +573,13 @@ static void fault_diagnosis(void) {
             if (regs.ufsr.bits.UNALIGNED) {
                 cmb_println(print_info[PRINT_UFSR_UNALIGNED]);
             }
-            if (regs.ufsr.bits.DIVBYZERO0) {
+            if (regs.ufsr.bits.DIVBYZERO) {
                 cmb_println(print_info[PRINT_UFSR_DIVBYZERO0]);
             }
         }
     }
     /* Debug Fault */
-    if (regs.hfsr.bits.DEBUGEVT) {
+    if (regs.hfsr.bits.DEBUGE_VT) {
         if (regs.dfsr.value) {
             if (regs.dfsr.bits.HALTED) {
                 cmb_println(print_info[PRINT_DFSR_HALTED]);
@@ -627,7 +633,7 @@ void cm_backtrace_fault(uint32_t fault_handler_lr, uint32_t fault_handler_sp) {
 
     on_fault = true;
 
-    cmb_println("");
+    cmb_println(" ");
     cm_backtrace_firmware_info();
 
 #ifdef CMB_USING_OS_PLATFORM
@@ -668,8 +674,8 @@ void cm_backtrace_fault(uint32_t fault_handler_lr, uint32_t fault_handler_sp) {
 #ifdef CMB_USING_DUMP_STACK_INFO
     /* check stack overflow */
     if (stack_pointer < stack_start_addr || stack_pointer > stack_start_addr + stack_size) {
-        cmb_println("stack_pointer: 0x%08x, stack_start_addr: 0x%08x, stack_end_addr: 0x%08x", stack_pointer, stack_start_addr,
-            stack_start_addr + stack_size);
+        cmb_println("stack_pointer: 0x%08x, stack_start_addr: 0x%08x, stack_end_addr: 0x%08x", (unsigned int)stack_pointer, (unsigned int)stack_start_addr,
+            (unsigned int)(stack_start_addr + stack_size));
         stack_is_overflow = true;
 #if (CMB_OS_PLATFORM_TYPE == CMB_OS_PLATFORM_RTT)
         if (on_thread_before_fault) {
@@ -695,14 +701,14 @@ void cm_backtrace_fault(uint32_t fault_handler_lr, uint32_t fault_handler_sp) {
         regs.saved.pc        = ((uint32_t *)saved_regs_addr)[6];  // Program counter PC
         regs.saved.psr.value = ((uint32_t *)saved_regs_addr)[7];  // Program status word PSR
 
-        cmb_println("  %s: %08x  %s: %08x  %s: %08x  %s: %08x", regs_name[0], regs.saved.r0,
-                                                                regs_name[1], regs.saved.r1,
-                                                                regs_name[2], regs.saved.r2,
-                                                                regs_name[3], regs.saved.r3);
-        cmb_println("  %s: %08x  %s: %08x  %s: %08x  %s: %08x", regs_name[4], regs.saved.r12,
-                                                                regs_name[5], regs.saved.lr,
-                                                                regs_name[6], regs.saved.pc,
-                                                                regs_name[7], regs.saved.psr.value);
+        cmb_println("  %s: %08x  %s: %08x  %s: %08x  %s: %08x", regs_name[0], (unsigned int)regs.saved.r0,
+                                                                regs_name[1], (unsigned int)regs.saved.r1,
+                                                                regs_name[2], (unsigned int)regs.saved.r2,
+                                                                regs_name[3], (unsigned int)regs.saved.r3);
+        cmb_println("  %s: %08x  %s: %08x  %s: %08x  %s: %08x", regs_name[4], (unsigned int)regs.saved.r12,
+                                                                regs_name[5], (unsigned int)regs.saved.lr,
+                                                                regs_name[6], (unsigned int)regs.saved.pc,
+                                                                regs_name[7], (unsigned int)regs.saved.psr.value);
         cmb_println("==============================================================");
     }
 
@@ -723,3 +729,75 @@ void cm_backtrace_fault(uint32_t fault_handler_lr, uint32_t fault_handler_sp) {
 
     print_call_stack(stack_pointer);
 }
+
+#if 1
+// Stack backtrace API
+/*
+ * @briefCheck ROM address range
+ * @param addr ROM address
+ * @return one if valid ROM address, else return zero
+*/
+static inline int is_valid_code_addr(uint32_t addr) {
+    return (addr >= code_start_addr && addr <= (code_start_addr + code_size));
+}
+
+/**
+ * @brief backtrace callback function from stack
+ * @param name Task name
+ * @param stack_addr_start start addrress
+ * @param stack_addr_end   end address
+ */
+void cm_backtrace_violence_base(const char *name, uint32_t *stack_addr_start, uint32_t *stack_addr_end) {
+    int depth = 0;
+
+    cmb_println("----------------------cm_backtrace_violence-------------------------");
+    cmb_println("Stack back trace task from base => task(%s) flash:{0x%08X, 0x%08X} SP:{start:%p end:%p}"
+            , name, code_start_addr, (code_start_addr + code_size)
+            , stack_addr_start, stack_addr_end
+            );
+
+    for (; stack_addr_start < stack_addr_end; stack_addr_start++) {
+        uint32_t value = *stack_addr_start;
+        if (!is_valid_code_addr(value)) {
+            continue;
+        }
+        #if 0
+        if (!(val & 0x1)) {
+            continue;
+        }
+        #endif
+        uint32_t pc = value & (~1UL);
+        uint32_t call_site = pc - 4;
+        if (!disassembly_ins_is_bl_blx(call_site)) {
+            continue;
+        }
+        cmb_println("#%04d PC: 0x%08X (Call Site: 0x%08X instruction_encode:0x%08X)", depth++, pc, call_site, *((uint32_t *)call_site));
+    }
+    cmb_println("--------------------------------------------------------------------");
+}
+
+/**
+ * @brief backtrace callback function from a specifal task
+ * @param TaskHandle Task handle
+ * @param is_full Start address(0: start from base address, 1: start from top address)
+ */
+void cm_backtrace_task_violence(TaskHandle_t TaskHandle, bool is_full) {
+    TaskStatus_t TaskStatus;
+    vTaskGetInfo(TaskHandle, &TaskStatus, 1, eInvalid);
+    if (is_full) {
+        cm_backtrace_violence_base(TaskStatus.pcTaskName, TaskStatus.pxStackBase, TaskStatus.pxEndOfStack);
+    } else {
+        cm_backtrace_violence_base(TaskStatus.pcTaskName, TaskStatus.pxTopOfStack, TaskStatus.pxEndOfStack);
+    }
+}
+
+/**
+ * @brief backtrace callback function from current task
+ * @param TaskHandle Task handle
+ * @param is_full Start address(0: start from base address, 1: start from top address)
+ */
+void cm_backtrace_current_task_violence(bool is_full) {
+    cm_backtrace_task_violence(xTaskGetCurrentTaskHandle(), is_full);
+}
+#endif
+
